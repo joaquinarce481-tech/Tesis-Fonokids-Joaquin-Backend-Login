@@ -1,7 +1,7 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
-const nodemailer = require('nodemailer');
+const sgMail = require('@sendgrid/mail'); // ✅ SENDGRID en lugar de nodemailer
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
@@ -31,31 +31,22 @@ pool.on('error', (err) => {
   console.error('❌ Error en PostgreSQL:', err);
 });
 
-// ✅ CONFIGURACIÓN CORREGIDA DE NODEMAILER
-const emailTransporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // true para port 465, false para otros puertos
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD
-  },
-  tls: {
-    rejectUnauthorized: false
-  },
-  connectionTimeout: 10000, // 10 segundos
-  greetingTimeout: 10000,
-  socketTimeout: 10000
-});
+// ✅ CONFIGURACIÓN DE SENDGRID (Reemplaza nodemailer)
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-// Verificar configuración de email al iniciar
-emailTransporter.verify(function(error, success) {
-  if (error) {
-    console.log('❌ Error en configuración de email:', error);
-  } else {
-    console.log('✅ Servidor de email listo para enviar mensajes');
+// Verificar configuración de SendGrid al iniciar
+(async () => {
+  try {
+    // Verificar que la API key esté configurada
+    if (!process.env.SENDGRID_API_KEY) {
+      console.log('⚠️ SENDGRID_API_KEY no configurada');
+    } else {
+      console.log('✅ SendGrid configurado correctamente');
+    }
+  } catch (error) {
+    console.log('❌ Error en configuración de SendGrid:', error);
   }
-});
+})();
 
 // Función para generar código de 6 dígitos
 function generateResetCode() {
@@ -171,7 +162,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// 2️⃣ FORGOT PASSWORD - Solicitar código de recuperación
+// 2️⃣ FORGOT PASSWORD - Solicitar código de recuperación (CON SENDGRID)
 app.post('/api/auth/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
@@ -209,13 +200,13 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     
     await executeQuery(insertCodeQuery, [user.id_paciente, email, resetCode, expiresAt]);
 
-    // Enviar email con código
+    // Plantilla de email
     const emailTemplate = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 15px;">
         <div style="background: white; padding: 30px; border-radius: 10px; text-align: center;">
-          <h1 style="color: #4A90E2; margin-bottom: 20px;"> ¡FonoKids - Recuperar Contraseña! </h1>
+          <h1 style="color: #4A90E2; margin-bottom: 20px;">🔑 FonoKids - Recuperar Contraseña</h1>
           <p style="font-size: 18px; color: #333; margin-bottom: 20px;">
-            ¡Hola <strong>${user.nombre_completo}</strong> 👋🏻!
+            ¡Hola <strong>${user.nombre_completo}</strong>! 👋
           </p>
           <p style="color: #666; margin-bottom: 30px;">
             Recibimos una solicitud para restablecer tu contraseña. Usa el siguiente código:
@@ -244,12 +235,15 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       </div>
     `;
 
-    await emailTransporter.sendMail({
-      from: `"FonoKids " <${process.env.EMAIL_USER}>`,
+    // ✅ ENVIAR EMAIL CON SENDGRID
+    const msg = {
       to: email,
-      subject: ' Código de Recuperación - FonoKids',
+      from: process.env.SENDGRID_SENDER_EMAIL, // Debe ser un email verificado en SendGrid
+      subject: '🔑 Código de Recuperación - FonoKids',
       html: emailTemplate
-    });
+    };
+
+    await sgMail.send(msg);
 
     console.log(`✅ Código enviado a: ${email} (Código: ${resetCode})`);
     
@@ -260,6 +254,12 @@ app.post('/api/auth/forgot-password', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Error enviando código:', error);
+    
+    // Más detalles del error de SendGrid
+    if (error.response) {
+      console.error('SendGrid Error Response:', error.response.body);
+    }
+    
     res.status(500).json({ 
       error: 'Error enviando código de recuperación' 
     });
@@ -454,8 +454,9 @@ app.get('/api/pacientes', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🚀 Servidor FonoKids ejecutándose en puerto ${PORT}`);
-  console.log(`📧 Email configurado: ${process.env.EMAIL_USER}`);
+  console.log(`📧 Email configurado con SendGrid`);
 });
+
 // 📋 RUTAS DE PERFIL SIMPLIFICADAS - Agregar después de las rutas de autenticación
 
 // OBTENER PERFIL DEL USUARIO
