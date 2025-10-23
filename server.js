@@ -31,12 +31,29 @@ pool.on('error', (err) => {
   console.error('❌ Error en PostgreSQL:', err);
 });
 
-// 🔧 CORRECIÓN: createTransport (sin "er")
+// ✅ CONFIGURACIÓN CORREGIDA DE NODEMAILER
 const emailTransporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // true para port 465, false para otros puertos
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASSWORD
+  },
+  tls: {
+    rejectUnauthorized: false
+  },
+  connectionTimeout: 10000, // 10 segundos
+  greetingTimeout: 10000,
+  socketTimeout: 10000
+});
+
+// Verificar configuración de email al iniciar
+emailTransporter.verify(function(error, success) {
+  if (error) {
+    console.log('❌ Error en configuración de email:', error);
+  } else {
+    console.log('✅ Servidor de email listo para enviar mensajes');
   }
 });
 
@@ -276,7 +293,7 @@ app.post('/api/auth/verify-reset-code', async (req, res) => {
       });
     }
 
-    console.log(`✅ Código válido para: ${email}`);
+    console.log('✅ Código verificado correctamente');
     
     res.json({
       message: 'Código verificado correctamente',
@@ -299,69 +316,54 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
     if (!email || !code || !newPassword) {
       return res.status(400).json({ 
-        error: 'Email, código y nueva contraseña son requeridos' 
-      });
-    }
-
-    if (newPassword.length < 6) {
-      return res.status(400).json({ 
-        error: 'La contraseña debe tener al menos 6 caracteres' 
+        error: 'Todos los campos son requeridos' 
       });
     }
 
     // Verificar código nuevamente
-    const codeQuery = `
+    const verifyQuery = `
       SELECT user_id FROM password_reset_codes 
       WHERE email = $1 AND reset_code = $2 AND used = false 
       AND expires_at > NOW()
     `;
     
-    const codeResult = await executeQuery(codeQuery, [email, code]);
+    const verifyResult = await executeQuery(verifyQuery, [email, code]);
 
-    if (codeResult.rows.length === 0) {
+    if (verifyResult.rows.length === 0) {
       return res.status(400).json({ 
         error: 'Código inválido o expirado' 
       });
     }
 
-    const userId = codeResult.rows[0].user_id;
+    const userId = verifyResult.rows[0].user_id;
 
     // Hashear nueva contraseña
     const hashedPassword = await bcrypt.hash(newPassword, SALT_ROUNDS);
 
     // Actualizar contraseña
-    const updateQuery = `
-      UPDATE pacientes 
-      SET password_hash = $1, updated_at = CURRENT_TIMESTAMP
-      WHERE id_paciente = $2
-    `;
-    
+    const updateQuery = 'UPDATE pacientes SET password_hash = $1 WHERE id_paciente = $2';
     await executeQuery(updateQuery, [hashedPassword, userId]);
 
     // Marcar código como usado
-    const markUsedQuery = `
-      UPDATE password_reset_codes 
-      SET used = true 
-      WHERE email = $1 AND reset_code = $2
-    `;
-    
+    const markUsedQuery = 'UPDATE password_reset_codes SET used = true WHERE email = $1 AND reset_code = $2';
     await executeQuery(markUsedQuery, [email, code]);
 
-    console.log(`✅ Contraseña actualizada para usuario ID: ${userId}`);
+    console.log(`✅ Contraseña actualizada para: ${email}`);
     
     res.json({
-      message: 'Contraseña actualizada exitosamente'
+      message: 'Contraseña actualizada exitosamente',
+      success: true
     });
 
   } catch (error) {
-    console.error('❌ Error actualizando contraseña:', error);
+    console.error('❌ Error restableciendo contraseña:', error);
     res.status(500).json({ 
-      error: 'Error actualizando contraseña' 
+      error: 'Error al restablecer la contraseña' 
     });
   }
 });
 
-// 5️⃣ CREATE USER - Crear nuevo usuario (SIMPLIFICADO)
+// 5️⃣ CREATE USER - Crear nuevo usuario
 app.post('/api/auth/create-user', async (req, res) => {
   try {
     const { username, email, password, nombre_completo } = req.body;
@@ -378,48 +380,25 @@ app.post('/api/auth/create-user', async (req, res) => {
     const checkResult = await executeQuery(checkQuery, [username, email]);
 
     if (checkResult.rows.length > 0) {
-      return res.status(409).json({ 
-        error: 'Usuario o email ya existe' 
+      return res.status(400).json({ 
+        error: 'El usuario o email ya existe' 
       });
     }
 
     // Hashear contraseña
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
-    // INSERTAR USUARIO CON CAMPOS BÁSICOS REQUERIDOS
+    // Insertar usuario
     const insertQuery = `
-      INSERT INTO pacientes (
-        username, 
-        email, 
-        password_hash, 
-        nombre_completo,
-        fecha_nacimiento,
-        sexo,
-        numero_documento,
-        direccion,
-        telefono_principal,
-        created_at,
-        updated_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO pacientes (username, email, password_hash, nombre_completo, activo, fecha_registro)
+      VALUES ($1, $2, $3, $4, true, CURRENT_TIMESTAMP)
       RETURNING id_paciente, username, email, nombre_completo
     `;
     
-    const result = await executeQuery(insertQuery, [
-      username, 
-      email, 
-      hashedPassword, 
-      nombre_completo,
-      '2000-01-01',        // fecha_nacimiento
-      'No especificado',   // sexo
-      '00000000',          // numero_documento
-      'No especificado',   // direccion
-      '000000000'          // telefono_principal
-    ]);
-    
+    const result = await executeQuery(insertQuery, [username, email, hashedPassword, nombre_completo]);
     const newUser = result.rows[0];
 
-    console.log(`✅ Usuario creado: ${newUser.username}`);
+    console.log(`✅ Usuario creado: ${username}`);
     
     res.status(201).json({
       message: 'Usuario creado exitosamente',
