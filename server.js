@@ -223,7 +223,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
           </p>
           
           <p style="color: #666; font-size: 14px; margin-top: 30px;">
-            Si no solicitaste este cambio, ignora este mensaje.
+            Si no solicitaste este cambioo, ignora este mensajee.
           </p>
           
           <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
