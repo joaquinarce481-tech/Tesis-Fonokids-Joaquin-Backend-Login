@@ -28,7 +28,7 @@ pool.on('connect', () => {
 });
 
 pool.on('error', (err) => {
-  console.error('❌ Error en PostgreSQL:', err);
+  console.error('❌ Error en el PostgreSQL:', err);
 });
 
 // ✅ CONFIGURACIÓN DE SENDGRID (Reemplaza nodemailer)
