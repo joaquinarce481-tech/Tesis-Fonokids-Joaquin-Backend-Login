@@ -951,7 +951,7 @@ app.delete('/api/historial-actividades/paciente/:id/all', async (req, res) => {
 // 🚀 INICIAR SERVIDOR
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor FonoKids ejecutándose en puerto ${PORT}`);
+  console.log(`🚀 Servidor FonoKids ejecutándose en este puerto ${PORT}`);
   console.log(`📧 Email configurado con SendGrid`);
   console.log(`📅 Sistema de Historial de Actividades: ✅ Activo`);
 });
