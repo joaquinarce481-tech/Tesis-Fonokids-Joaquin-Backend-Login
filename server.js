@@ -148,6 +148,7 @@ app.post('/api/auth/login', async (req, res) => {
       token,
       user: {
         id: user.id_paciente,
+        id_paciente: user.id_paciente, // ⭐ Agregado para que funcione en el frontend
         username: user.username,
         email: user.email,
         name: user.nombre_completo
@@ -450,13 +451,6 @@ app.get('/api/pacientes', async (req, res) => {
   }
 });
 
-// 🚀 INICIAR SERVIDOR
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor FonoKids ejecutándose en puerto ${PORT}`);
-  console.log(`📧 Email configurado con SendGrid`);
-});
-
 // 📋 RUTAS DE PERFIL SIMPLIFICADAS - Agregar después de las rutas de autenticación
 
 // OBTENER PERFIL DEL USUARIO
@@ -682,4 +676,282 @@ app.get('/api/perfil/:id', authenticateToken, async (req, res) => {
       error: 'Error obteniendo perfil' 
     });
   }
+});
+
+// ========================================
+// 📅 RUTAS DE HISTORIAL DE ACTIVIDADES
+// ========================================
+
+// 1️⃣ CREAR NUEVA ACTIVIDAD
+app.post('/api/historial-actividades', async (req, res) => {
+  try {
+    const { id_paciente, tipo_actividad, nombre_actividad } = req.body;
+    
+    console.log('📝 POST /historial-actividades - Registrando actividad:', {
+      id_paciente,
+      tipo_actividad,
+      nombre_actividad
+    });
+
+    // Validaciones
+    if (!id_paciente || !tipo_actividad || !nombre_actividad) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Todos los campos son requeridos' 
+      });
+    }
+
+    // Validar tipo de actividad
+    if (!['juego_terapeutico', 'ejercicio_praxia'].includes(tipo_actividad)) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Tipo de actividad inválido' 
+      });
+    }
+
+    // Obtener fecha actual en formato YYYY-MM-DD
+    const fecha = new Date().toISOString().split('T')[0];
+
+    // Insertar la actividad
+    const insertQuery = `
+      INSERT INTO historial_actividades (id_paciente, fecha, tipo_actividad, nombre_actividad)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id_actividad, id_paciente, fecha, tipo_actividad, nombre_actividad, created_at
+    `;
+
+    const result = await executeQuery(insertQuery, [
+      id_paciente,
+      fecha,
+      tipo_actividad,
+      nombre_actividad
+    ]);
+
+    const actividad = result.rows[0];
+
+    console.log('✅ Actividad registrada:', {
+      id: actividad.id_actividad,
+      paciente: actividad.id_paciente,
+      tipo: actividad.tipo_actividad,
+      nombre: actividad.nombre_actividad,
+      fecha: actividad.fecha
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Actividad registrada exitosamente',
+      data: actividad
+    });
+
+  } catch (error) {
+    console.error('❌ Error registrando actividad:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Error registrando actividad' 
+    });
+  }
+});
+
+// 2️⃣ OBTENER HISTORIAL COMPLETO DE UN PACIENTE
+app.get('/api/historial-actividades/paciente/:id', async (req, res) => {
+  try {
+    const idPaciente = req.params.id;
+    console.log(`📊 GET /historial-actividades/paciente/${idPaciente}`);
+
+    const query = `
+      SELECT 
+        id_actividad,
+        id_paciente,
+        fecha,
+        tipo_actividad,
+        nombre_actividad,
+        created_at
+      FROM historial_actividades
+      WHERE id_paciente = $1
+      ORDER BY fecha DESC, created_at DESC
+    `;
+
+    const result = await executeQuery(query, [idPaciente]);
+
+    console.log(`✅ Encontradas ${result.rows.length} actividades para paciente ${idPaciente}`);
+
+    res.json({
+      success: true,
+      message: 'Historial obtenido exitosamente',
+      data: result.rows,
+      total: result.rows.length
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo historial:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Error obteniendo historial' 
+    });
+  }
+});
+
+// 3️⃣ OBTENER ACTIVIDADES DE UNA FECHA ESPECÍFICA
+app.get('/api/historial-actividades/paciente/:id/fecha/:fecha', async (req, res) => {
+  try {
+    const { id, fecha } = req.params;
+    console.log(`📅 GET /historial-actividades/paciente/${id}/fecha/${fecha}`);
+
+    const query = `
+      SELECT 
+        id_actividad,
+        id_paciente,
+        fecha,
+        tipo_actividad,
+        nombre_actividad,
+        created_at
+      FROM historial_actividades
+      WHERE id_paciente = $1 AND fecha = $2
+      ORDER BY created_at DESC
+    `;
+
+    const result = await executeQuery(query, [id, fecha]);
+
+    res.json({
+      success: true,
+      message: 'Actividades de la fecha obtenidas exitosamente',
+      data: result.rows,
+      total: result.rows.length
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo actividades de la fecha:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Error obteniendo actividades' 
+    });
+  }
+});
+
+// 4️⃣ OBTENER ESTADÍSTICAS DE UN PACIENTE
+app.get('/api/historial-actividades/paciente/:id/estadisticas', async (req, res) => {
+  try {
+    const idPaciente = req.params.id;
+    console.log(`📈 GET /historial-actividades/paciente/${idPaciente}/estadisticas`);
+
+    // Obtener todas las actividades
+    const query = `
+      SELECT 
+        tipo_actividad,
+        fecha,
+        COUNT(*) as cantidad
+      FROM historial_actividades
+      WHERE id_paciente = $1
+      GROUP BY tipo_actividad, fecha
+      ORDER BY fecha DESC
+    `;
+
+    const result = await executeQuery(query, [idPaciente]);
+
+    // Calcular estadísticas
+    let totalActividades = 0;
+    let totalJuegos = 0;
+    let totalEjercicios = 0;
+    const fechasUnicas = new Set();
+    const hoy = new Date().toISOString().split('T')[0];
+    let actividadesHoy = 0;
+
+    result.rows.forEach(row => {
+      const cantidad = parseInt(row.cantidad);
+      totalActividades += cantidad;
+      
+      if (row.tipo_actividad === 'juego_terapeutico') {
+        totalJuegos += cantidad;
+      } else if (row.tipo_actividad === 'ejercicio_praxia') {
+        totalEjercicios += cantidad;
+      }
+      
+      fechasUnicas.add(row.fecha);
+      
+      if (row.fecha === hoy) {
+        actividadesHoy += cantidad;
+      }
+    });
+
+    const stats = {
+      totalActividades,
+      totalJuegos,
+      totalEjercicios,
+      diasPracticados: fechasUnicas.size,
+      actividadesHoy
+    };
+
+    console.log('✅ Estadísticas calculadas:', stats);
+
+    res.json({
+      success: true,
+      message: 'Estadísticas obtenidas exitosamente',
+      data: stats
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo estadísticas:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Error obteniendo estadísticas' 
+    });
+  }
+});
+
+// 5️⃣ ELIMINAR UNA ACTIVIDAD ESPECÍFICA (OPCIONAL)
+app.delete('/api/historial-actividades/:id', async (req, res) => {
+  try {
+    const idActividad = req.params.id;
+    console.log(`🗑️ DELETE /historial-actividades/${idActividad}`);
+
+    const deleteQuery = 'DELETE FROM historial_actividades WHERE id_actividad = $1';
+    const result = await executeQuery(deleteQuery, [idActividad]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Actividad no encontrada' 
+      });
+    }
+
+    console.log(`✅ Actividad ${idActividad} eliminada`);
+
+    res.status(204).send();
+
+  } catch (error) {
+    console.error('❌ Error eliminando actividad:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Error eliminando actividad' 
+    });
+  }
+});
+
+// 6️⃣ ELIMINAR TODO EL HISTORIAL DE UN PACIENTE (OPCIONAL)
+app.delete('/api/historial-actividades/paciente/:id/all', async (req, res) => {
+  try {
+    const idPaciente = req.params.id;
+    console.log(`🗑️ DELETE /historial-actividades/paciente/${idPaciente}/all`);
+
+    const deleteQuery = 'DELETE FROM historial_actividades WHERE id_paciente = $1';
+    const result = await executeQuery(deleteQuery, [idPaciente]);
+
+    console.log(`✅ Historial del paciente ${idPaciente} eliminado (${result.rowCount} registros)`);
+
+    res.status(204).send();
+
+  } catch (error) {
+    console.error('❌ Error eliminando historial:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Error eliminando historial' 
+    });
+  }
+});
+
+// 🚀 INICIAR SERVIDOR
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor FonoKids ejecutándose en puerto ${PORT}`);
+  console.log(`📧 Email configurado con SendGrid`);
+  console.log(`📅 Sistema de Historial de Actividades: ✅ Activo`);
 });
